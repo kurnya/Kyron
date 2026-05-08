@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec
+
+# Local runtime data
+scripts/
+*.json
+
+# Optional editor/system files
+.DS_Store
+Thumbs.db
