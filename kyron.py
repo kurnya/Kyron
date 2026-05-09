@@ -23,22 +23,31 @@ from pynput import mouse as pynput_mouse
 
 
 APP_TITLE = "Kyron - AutoCliker"
-SCRIPT_DIR = Path(__file__).with_name("scripts")
-LEGACY_SCRIPT_FILE = Path(__file__).with_name("scripts.json")
-OLD_SCRIPT_DIR = Path(__file__).with_name("kyron_scripts")
-OLD_LEGACY_SCRIPT_FILE = Path(__file__).with_name("kyron_scripts.json")
-OLDER_SCRIPT_DIR = Path(__file__).with_name("blueclick_scripts")
-OLDER_LEGACY_SCRIPT_FILE = Path(__file__).with_name("blueclick_scripts.json")
-LOGO_FILE = Path(__file__).with_name("logo.png")
 DEFAULT_HOTKEY = "/"
 UNTITLED_SCRIPT = "Script baru"
 CLICK_POSITION_JITTER = 10
 DELAY_JITTER_MS = 12
 
 
+def app_base_path():
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
 def resource_path(filename):
     base_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
     return base_dir / filename
+
+
+APP_DIR = app_base_path()
+SCRIPT_DIR = APP_DIR / "scripts"
+LEGACY_SCRIPT_FILE = APP_DIR / "scripts.json"
+OLD_SCRIPT_DIR = APP_DIR / "kyron_scripts"
+OLD_LEGACY_SCRIPT_FILE = APP_DIR / "kyron_scripts.json"
+OLDER_SCRIPT_DIR = APP_DIR / "blueclick_scripts"
+OLDER_LEGACY_SCRIPT_FILE = APP_DIR / "blueclick_scripts.json"
+LOGO_FILE = APP_DIR / "logo.png"
 
 
 THEMES = {
