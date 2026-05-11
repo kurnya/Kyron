@@ -15,6 +15,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+import ctypes
 from pathlib import Path
 from tkinter import messagebox, simpledialog, ttk
 
@@ -27,6 +28,56 @@ DEFAULT_HOTKEY = "/"
 UNTITLED_SCRIPT = "Script baru"
 CLICK_POSITION_JITTER = 10
 DELAY_JITTER_MS = 12
+
+
+class POINT(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+
+def enable_high_dpi_awareness():
+    """Use physical screen coordinates on Windows across DPI-scaled monitors."""
+    if sys.platform != "win32":
+        return
+
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        return
+    except Exception:
+        pass
+
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
+
+def get_cursor_position():
+    if sys.platform != "win32":
+        return None
+
+    point = POINT()
+    if ctypes.windll.user32.GetCursorPos(ctypes.byref(point)):
+        return (int(point.x), int(point.y))
+    return None
+
+
+def set_cursor_position(x, y):
+    if sys.platform != "win32":
+        return False
+    return bool(ctypes.windll.user32.SetCursorPos(int(x), int(y)))
+
+
+def perform_left_click(x, y):
+    if sys.platform != "win32":
+        return False
+
+    if not set_cursor_position(x, y):
+        return False
+
+    user32 = ctypes.windll.user32
+    user32.mouse_event(0x0002, 0, 0, 0, 0)
+    user32.mouse_event(0x0004, 0, 0, 0, 0)
+    return True
 
 
 def app_base_path():
@@ -114,6 +165,7 @@ class KyronApp(tk.Tk):
         self.worker_thread = None
         self.hotkey = tk.StringVar(value=DEFAULT_HOTKEY)
         self.picking_coordinate = False
+        self.pick_listener = None
         self.app_icon = None
 
         self.set_window_icon()
@@ -229,10 +281,10 @@ class KyronApp(tk.Tk):
         self.pick_button.grid(row=0, column=0, padx=(0, 6), ipady=4, ipadx=8)
         self.pick_button._role = "soft"
         tk.Label(row, text="X:", font=("Segoe UI", 9)).grid(row=0, column=1, sticky="w")
-        self.x_input = tk.Spinbox(row, from_=0, to=99999, textvariable=self.x_var, font=("Segoe UI", 9))
+        self.x_input = tk.Spinbox(row, from_=-99999, to=99999, textvariable=self.x_var, font=("Segoe UI", 9))
         self.x_input.grid(row=0, column=2, sticky="ew", padx=(5, 6), ipady=3)
         tk.Label(row, text="Y:", font=("Segoe UI", 9)).grid(row=0, column=3, sticky="w")
-        self.y_input = tk.Spinbox(row, from_=0, to=99999, textvariable=self.y_var, font=("Segoe UI", 9))
+        self.y_input = tk.Spinbox(row, from_=-99999, to=99999, textvariable=self.y_var, font=("Segoe UI", 9))
         self.y_input.grid(row=0, column=4, sticky="ew", padx=(5, 6), ipady=3)
         self.add_click_button = tk.Button(row, text="Tambah", command=self.add_click_action, font=("Segoe UI", 9, "bold"))
         self.add_click_button.grid(row=0, column=5, ipady=4, ipadx=8)
@@ -1015,20 +1067,26 @@ class KyronApp(tk.Tk):
         if self.picking_coordinate:
             return
         self.picking_coordinate = True
-        self.set_status("Status: Klik posisi target di layar...")
+        self.set_status("Status: Klik posisi target di layar (koordinat monitor asli)...")
         self.withdraw()
 
         def on_click(x, y, _button, pressed):
             if pressed:
-                self.x_var.set(int(x))
-                self.y_var.set(int(y))
+                native_position = get_cursor_position()
+                if native_position is not None:
+                    picked_x, picked_y = native_position
+                else:
+                    picked_x = int(round(x))
+                    picked_y = int(round(y))
                 self.picking_coordinate = False
-                self.after(0, self.deiconify)
-                self.after(0, lambda: self.set_status(f"Status: Koordinat dipilih X:{int(x)} Y:{int(y)}"))
+                self.pick_listener = None
+                self.after(0, lambda: self.apply_picked_coordinate(picked_x, picked_y))
+                self.after(0, lambda: self.set_status(f"Status: Koordinat dipilih X:{picked_x} Y:{picked_y}"))
                 return False
             return True
 
-        pynput_mouse.Listener(on_click=on_click).start()
+        self.pick_listener = pynput_mouse.Listener(on_click=on_click)
+        self.pick_listener.start()
 
     def set_hotkey(self):
         value = self.hotkey.get().strip()
@@ -1094,11 +1152,18 @@ class KyronApp(tk.Tk):
             if self.stop_event.is_set():
                 break
             if action["type"] == "click":
-                self.mouse_controller.position = self.randomize_click_position(action["x"], action["y"])
-                self.mouse_controller.click(pynput_mouse.Button.left)
+                click_x, click_y = self.randomize_click_position(action["x"], action["y"])
+                if not perform_left_click(click_x, click_y):
+                    self.mouse_controller.position = (click_x, click_y)
+                    self.mouse_controller.click(pynput_mouse.Button.left)
             elif action["type"] == "key":
                 self.tap_key(action["key"])
             self.sleep_ms(self.randomize_delay_ms(action.get("delay_ms", self.delay_var.get())))
+
+    def apply_picked_coordinate(self, x, y):
+        self.x_var.set(int(x))
+        self.y_var.set(int(y))
+        self.deiconify()
 
     def tap_key(self, key_name):
         if len(key_name) == 1:
@@ -1160,9 +1225,15 @@ class KyronApp(tk.Tk):
             self.hotkey_listener.stop()
         except RuntimeError:
             pass
+        if self.pick_listener is not None:
+            try:
+                self.pick_listener.stop()
+            except RuntimeError:
+                pass
         self.destroy()
 
 
 if __name__ == "__main__":
+    enable_high_dpi_awareness()
     app = KyronApp()
     app.mainloop()
